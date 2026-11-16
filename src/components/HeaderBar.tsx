@@ -16,7 +16,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   isAuditing,
 }) => {
   return (
-    <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur-sm">
+    <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur-sm print:hidden">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-8 px-4 py-3.5 sm:px-6 lg:px-8">
         <a
           href="#workbench"

@@ -3,14 +3,19 @@ import {
   AlertTriangle,
   CheckCircle2,
   Loader2,
+  Mail,
   MessageSquare,
   Pause,
   Play,
+  Printer,
   ShieldAlert,
   Volume2,
 } from 'lucide-react';
 import type { ComplianceAuditResult } from '../types/audit';
-import { buildTtsBriefingScript } from '../utils/compliance';
+import {
+  buildComplianceMailtoUrl,
+  buildTtsBriefingScript,
+} from '../utils/compliance';
 
 interface AuditSummarySectionProps {
   audit: ComplianceAuditResult;
@@ -126,7 +131,7 @@ export const AuditSummarySection: React.FC<AuditSummarySectionProps> = ({
           </h2>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5 print:hidden">
           <button
             type="button"
             onClick={() => void handleToggleTts()}
@@ -154,6 +159,23 @@ export const AuditSummarySection: React.FC<AuditSummarySectionProps> = ({
                   : 'Listen to Audit Briefing'}
             </span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <Printer className="h-4 w-4 text-slate-600" aria-hidden="true" />
+            <span>Print Report</span>
+          </button>
+
+          <a
+            href={buildComplianceMailtoUrl(audit)}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0"
+          >
+            <Mail className="h-4 w-4 text-slate-600" aria-hidden="true" />
+            <span>Share via Email</span>
+          </a>
 
           <button
             type="button"

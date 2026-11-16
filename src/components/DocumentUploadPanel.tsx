@@ -140,7 +140,7 @@ export const DocumentUploadPanel: React.FC<DocumentUploadPanelProps> = ({
     <section
       id="workbench"
       aria-labelledby="workbench-heading"
-      className="scroll-mt-20 rounded-xl border border-slate-200 bg-white p-6"
+      className="scroll-mt-20 rounded-xl border border-slate-200 bg-white p-6 print:hidden"
     >
       <div className="flex flex-col gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>

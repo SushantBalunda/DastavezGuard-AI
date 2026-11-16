@@ -1,14 +1,27 @@
 import { useState } from 'react';
 import { MessageSquare, ShieldCheck } from 'lucide-react';
 import { HeaderBar } from './components/HeaderBar';
+import { AuditProgressStepper } from './components/AuditProgressStepper';
 import { DocumentUploadPanel } from './components/DocumentUploadPanel';
 import { AuditSummarySection } from './components/AuditSummarySection';
 import { DiscrepancyMatrix } from './components/DiscrepancyMatrix';
 import { DocumentFindingsList } from './components/DocumentFindingsList';
 import { ComplianceAdvisorChat } from './components/ComplianceAdvisorChat';
 import { ComplianceRulesModal } from './components/ComplianceRulesModal';
+import { RecentAuditsPanel } from './components/RecentAuditsPanel';
 import type { ComplianceAuditResult, UploadedDocFile } from './types/audit';
-import { getSampleAuditCase, TARGET_SCHEMES } from './utils/compliance';
+import {
+  getAuditWorkflowStage,
+  getSampleAuditCase,
+  TARGET_SCHEMES,
+} from './utils/compliance';
+import {
+  loadRecentAuditsFromStorage,
+  removeRecentAudit,
+  saveRecentAuditsToStorage,
+  upsertRecentAudit,
+  type RecentAuditEntry,
+} from './utils/auditHistory';
 
 export default function App() {
   const [files, setFiles] = useState<UploadedDocFile[]>([]);
@@ -21,6 +34,21 @@ export default function App() {
   const [validationError, setValidationError] = useState<string | null>(null);
   const [isAdvisorOpen, setIsAdvisorOpen] = useState<boolean>(false);
   const [isRulesOpen, setIsRulesOpen] = useState<boolean>(false);
+  const [recentAudits, setRecentAudits] = useState<RecentAuditEntry[]>(() =>
+    typeof window !== 'undefined' ? loadRecentAuditsFromStorage(window.localStorage) : [],
+  );
+  const [activeAuditId, setActiveAuditId] = useState<string | null>(null);
+
+  const recordAuditInHistory = (result: ComplianceAuditResult) => {
+    setRecentAudits((prev) => {
+      const { entries, activeId } = upsertRecentAudit(prev, result);
+      if (typeof window !== 'undefined') {
+        saveRecentAuditsToStorage(window.localStorage, entries);
+      }
+      setActiveAuditId(activeId);
+      return entries;
+    });
+  };
 
   const effectiveScheme =
     targetScheme === 'Custom Scheme' ? customScheme.trim() : targetScheme.trim();
@@ -39,6 +67,7 @@ export default function App() {
   const handleClearAll = () => {
     setFiles([]);
     setAuditResult(null);
+    setActiveAuditId(null);
     setValidationError(null);
     setAuditError(null);
   };
@@ -50,6 +79,7 @@ export default function App() {
     setCustomScheme('');
     setTodayDate(sample.todayDate);
     setAuditResult(sample.auditResult);
+    recordAuditInHistory(sample.auditResult);
     setValidationError(null);
     setAuditError(null);
   };
@@ -93,6 +123,7 @@ export default function App() {
       }
 
       setAuditResult(data);
+      recordAuditInHistory(data);
     } catch (err) {
       setAuditError(
         err instanceof Error
@@ -101,6 +132,42 @@ export default function App() {
       );
     } finally {
       setIsAuditing(false);
+    }
+  };
+
+  const handleSelectRecentAudit = (entry: RecentAuditEntry) => {
+    setAuditResult(entry.result);
+    setActiveAuditId(entry.id);
+    setAuditError(null);
+    setValidationError(null);
+    const entryNames = entry.result.documents.map((d) => d.fileName);
+    const currentNames = files.map((f) => f.name);
+    const sameFiles =
+      entryNames.length === currentNames.length &&
+      entryNames.every((name, idx) => name === currentNames[idx]);
+    if (!sameFiles) {
+      setFiles([]);
+    }
+  };
+
+  const handleRemoveRecentAudit = (id: string) => {
+    setRecentAudits((prev) => {
+      const next = removeRecentAudit(prev, id);
+      if (typeof window !== 'undefined') {
+        saveRecentAuditsToStorage(window.localStorage, next);
+      }
+      return next;
+    });
+    if (activeAuditId === id) {
+      setActiveAuditId(null);
+    }
+  };
+
+  const handleClearRecentHistory = () => {
+    setRecentAudits([]);
+    setActiveAuditId(null);
+    if (typeof window !== 'undefined') {
+      saveRecentAuditsToStorage(window.localStorage, []);
     }
   };
 
@@ -115,6 +182,11 @@ export default function App() {
       />
 
       <main className="mx-auto w-full max-w-7xl flex-1 space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+        <AuditProgressStepper
+          currentStage={getAuditWorkflowStage(isAuditing, auditResult !== null)}
+          hasDocuments={files.length > 0}
+        />
+
         <DocumentUploadPanel
           files={files}
           targetScheme={targetScheme}
@@ -136,6 +208,14 @@ export default function App() {
           onTodayDateChange={setTodayDate}
           onRunAudit={() => void handleRunAudit()}
           onLoadSample={handleLoadSample}
+        />
+
+        <RecentAuditsPanel
+          entries={recentAudits}
+          activeAuditId={activeAuditId}
+          onSelectAudit={handleSelectRecentAudit}
+          onRemoveAudit={handleRemoveRecentAudit}
+          onClearHistory={handleClearRecentHistory}
         />
 
         {auditError && (
@@ -200,12 +280,12 @@ export default function App() {
               onOpenAdvisor={() => setIsAdvisorOpen(true)}
             />
             <DiscrepancyMatrix audit={auditResult} />
-            <DocumentFindingsList audit={auditResult} />
+            <DocumentFindingsList audit={auditResult} uploadedFiles={files} />
           </>
         )}
       </main>
 
-      <footer className="border-t border-slate-200 bg-white">
+      <footer className="border-t border-slate-200 bg-white print:hidden">
         <div className="mx-auto flex max-w-7xl flex-col gap-2 px-4 py-5 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
           <p>DastavezGuard AI · Pre-Submission Document Verification Assistant</p>
           <div className="flex items-center gap-4">

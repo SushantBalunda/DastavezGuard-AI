@@ -4,6 +4,32 @@ import type {
   ValidityStatus,
 } from '../types/audit';
 
+export type AuditStage = 'upload' | 'processing' | 'review';
+
+export function getAuditWorkflowStage(
+  isAuditing: boolean,
+  hasAuditResult: boolean,
+): AuditStage {
+  if (isAuditing) return 'processing';
+  if (hasAuditResult) return 'review';
+  return 'upload';
+}
+
+export function matchUploadedFileForDocument(
+  files: UploadedDocFile[],
+  documentIndex: number,
+  fileName: string,
+): UploadedDocFile | null {
+  if (!files || files.length === 0) return null;
+  const byIndex = files[documentIndex - 1];
+  if (byIndex && byIndex.name === fileName) {
+    return byIndex;
+  }
+  const byName = files.find((f) => f.name === fileName);
+  if (byName) return byName;
+  return byIndex ?? null;
+}
+
 export const TARGET_SCHEMES = [
   'UPSC Civil Services Examination (CSE)',
   'JEE Main / JoSAA Counselling',
@@ -255,6 +281,49 @@ export function buildTtsBriefingScript(audit: ComplianceAuditResult): string {
     topDiscrepancy,
     firstAction,
   ].join(' ');
+}
+
+export function buildComplianceMailtoUrl(audit: ComplianceAuditResult): string {
+  const subject = `DastavezGuard AI Audit: ${audit.targetScheme} (${audit.readinessScore}/100 - ${audit.readinessTier})`;
+
+  const discrepancyLines =
+    audit.discrepancies.length === 0
+      ? ['- None detected. All checked fields are consistent.']
+      : audit.discrepancies.map(
+          (item, index) =>
+            `${index + 1}. [${item.severity}] ${item.field}: ${item.summary}\n   Remediation: ${item.remediationStep}`,
+        );
+
+  const actionLines =
+    audit.recommendedNextActions.length === 0
+      ? []
+      : [
+          '',
+          'Recommended Next Actions:',
+          ...audit.recommendedNextActions.map((step, index) => `${index + 1}. ${step}`),
+        ];
+
+  const rawBody = [
+    `DastavezGuard AI Pre-Submission Compliance Summary`,
+    `Target Scheme: ${audit.targetScheme}`,
+    `Audit Date: ${audit.auditDate}`,
+    `Overall Readiness Score: ${audit.readinessScore} / 100 (${audit.readinessTier})`,
+    `Critical Blockers: ${audit.criticalBlockersCount} | Minor Warnings: ${audit.minorWarningsCount}`,
+    '',
+    `Auditor Verdict:`,
+    audit.executiveVerdict,
+    '',
+    `Compliance Discrepancies:`,
+    ...discrepancyLines,
+    ...actionLines,
+  ].join('\n');
+
+  const safeBody =
+    rawBody.length > 1600
+      ? `${rawBody.slice(0, 1580).trimEnd()}\n... (truncated for email length)`
+      : rawBody;
+
+  return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(safeBody)}`;
 }
 
 function svgToBase64(svg: string): string {

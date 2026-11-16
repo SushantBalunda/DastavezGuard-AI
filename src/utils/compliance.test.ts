@@ -1,11 +1,61 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildComplianceMailtoUrl,
   calculateReadinessScore,
   checkCertificateValidity,
   comparePersonNames,
+  getAuditWorkflowStage,
+  getSampleAuditCase,
   maskAadhaarNumber,
+  matchUploadedFileForDocument,
 } from './compliance';
+import type { UploadedDocFile } from '../types/audit';
+
+test('buildComplianceMailtoUrl encodes score, scheme, and discrepancies into mailto URL', () => {
+  const sample = getSampleAuditCase().auditResult;
+  const mailtoUrl = buildComplianceMailtoUrl(sample);
+  assert.ok(mailtoUrl.startsWith('mailto:?subject='));
+  assert.ok(mailtoUrl.includes('&body='));
+  assert.ok(!mailtoUrl.includes('+'));
+  const decoded = decodeURIComponent(mailtoUrl);
+  assert.ok(decoded.includes('20 / 100'));
+  assert.ok(decoded.includes('High Rejection Risk'));
+  assert.ok(decoded.includes('UPSC Civil Services Examination (CSE)'));
+  assert.ok(decoded.includes('Aarav Kr. Sharma'));
+});
+
+test('matchUploadedFileForDocument correlates uploaded files by index and filename', () => {
+  const files: UploadedDocFile[] = [
+    {
+      id: '1',
+      name: 'aadhaar.png',
+      mimeType: 'image/png',
+      sizeBytes: 100,
+      base64Data: 'abc',
+      previewUrl: 'data:image/png;base64,abc',
+    },
+    {
+      id: '2',
+      name: 'income.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 200,
+      base64Data: 'def',
+      previewUrl: 'data:application/pdf;base64,def',
+    },
+  ];
+  assert.equal(matchUploadedFileForDocument(files, 1, 'aadhaar.png')?.id, '1');
+  assert.equal(matchUploadedFileForDocument(files, 1, 'income.pdf')?.id, '2');
+  assert.equal(matchUploadedFileForDocument(files, 2, 'renamed.pdf')?.id, '2');
+  assert.equal(matchUploadedFileForDocument([], 1, 'aadhaar.png'), null);
+});
+
+test('getAuditWorkflowStage transitions through upload, processing, and review', () => {
+  assert.equal(getAuditWorkflowStage(false, false), 'upload');
+  assert.equal(getAuditWorkflowStage(true, false), 'processing');
+  assert.equal(getAuditWorkflowStage(true, true), 'processing');
+  assert.equal(getAuditWorkflowStage(false, true), 'review');
+});
 
 test('maskAadhaarNumber masks first 8 digits of 12-digit Aadhaar IDs', () => {
   assert.equal(maskAadhaarNumber('4829 7310 9184', 'Aadhaar Card'), 'XXXX-XXXX-9184');

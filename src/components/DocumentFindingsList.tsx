@@ -1,9 +1,24 @@
 import React, { useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Eye, ShieldAlert } from 'lucide-react';
-import type { AuditedDocument, ComplianceAuditResult } from '../types/audit';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Eye,
+  FileText,
+  Image as ImageIcon,
+  ShieldAlert,
+  X,
+  ZoomIn,
+} from 'lucide-react';
+import type {
+  AuditedDocument,
+  ComplianceAuditResult,
+  UploadedDocFile,
+} from '../types/audit';
+import { matchUploadedFileForDocument } from '../utils/compliance';
 
 interface DocumentFindingsListProps {
   audit: ComplianceAuditResult;
+  uploadedFiles: UploadedDocFile[];
 }
 
 type FilterMode = 'ALL' | 'CRITICAL' | 'WARNING' | 'VERIFIED';
@@ -29,8 +44,16 @@ function getDocumentSeverity(doc: AuditedDocument): 'CRITICAL' | 'WARNING' | 'VE
   return 'VERIFIED';
 }
 
-export const DocumentFindingsList: React.FC<DocumentFindingsListProps> = ({ audit }) => {
+export const DocumentFindingsList: React.FC<DocumentFindingsListProps> = ({
+  audit,
+  uploadedFiles,
+}) => {
   const [filter, setFilter] = useState<FilterMode>('ALL');
+  const [zoomedPreview, setZoomedPreview] = useState<{
+    title: string;
+    fileName: string;
+    src: string;
+  } | null>(null);
 
   const counts = useMemo(() => {
     let critical = 0;
@@ -69,7 +92,7 @@ export const DocumentFindingsList: React.FC<DocumentFindingsListProps> = ({ audi
         <div
           role="group"
           aria-label="Filter documents by audit status"
-          className="flex flex-wrap items-center gap-1 rounded-lg bg-slate-100 p-1"
+          className="flex flex-wrap items-center gap-1 rounded-lg bg-slate-100 p-1 print:hidden"
         >
           {(
             [
@@ -104,10 +127,18 @@ export const DocumentFindingsList: React.FC<DocumentFindingsListProps> = ({ audi
         <div className="mt-5 space-y-4">
           {filteredDocs.map((doc) => {
             const sev = getDocumentSeverity(doc);
+            const matchedFile = matchUploadedFileForDocument(
+              uploadedFiles,
+              doc.documentIndex,
+              doc.fileName,
+            );
+            const isPdf = matchedFile?.mimeType === 'application/pdf';
+            const canZoom = Boolean(matchedFile && !isPdf && matchedFile.previewUrl);
+
             return (
               <article
                 key={`${doc.documentIndex}-${doc.fileName}`}
-                className="rounded-lg border border-slate-200 bg-white"
+                className="rounded-lg border border-slate-200 bg-white break-inside-avoid"
               >
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/70 px-4 py-3">
                   <div>
@@ -179,7 +210,59 @@ export const DocumentFindingsList: React.FC<DocumentFindingsListProps> = ({ audi
                 </div>
 
                 <div className="grid grid-cols-1 gap-6 p-4 lg:grid-cols-12">
-                  <div className="lg:col-span-7">
+                  <div className="lg:col-span-3">
+                    <div className="overflow-hidden rounded-md border border-slate-200 bg-slate-50">
+                      {matchedFile ? (
+                        isPdf ? (
+                          <div className="flex aspect-[16/11] w-full flex-col items-center justify-center gap-1.5 px-3 text-center text-slate-600">
+                            <FileText className="h-8 w-8 text-blue-700" aria-hidden="true" />
+                            <span className="font-mono text-xs font-medium text-slate-800">
+                              PDF Document
+                            </span>
+                            <span className="max-w-full truncate text-[11px] text-slate-500">
+                              {matchedFile.name}
+                            </span>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setZoomedPreview({
+                                title: `Doc 0${doc.documentIndex} · ${doc.documentType}`,
+                                fileName: doc.fileName,
+                                src: matchedFile.previewUrl,
+                              })
+                            }
+                            aria-label={`Inspect thumbnail preview for ${doc.documentType}`}
+                            className="group relative block aspect-[16/11] w-full overflow-hidden bg-white cursor-pointer focus-visible:outline-2 focus-visible:outline-blue-700"
+                          >
+                            <img
+                              src={matchedFile.previewUrl}
+                              alt={`Document thumbnail: ${doc.documentType} (${doc.fileName})`}
+                              referrerPolicy="no-referrer"
+                              className="h-full w-full object-cover transition-transform duration-150 group-hover:scale-[1.02]"
+                            />
+                            <span className="absolute right-2 bottom-2 inline-flex items-center gap-1 rounded bg-slate-900/80 px-2 py-0.5 text-[11px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100 print:hidden">
+                              <ZoomIn className="h-3 w-3" aria-hidden="true" />
+                              <span>Inspect</span>
+                            </span>
+                          </button>
+                        )
+                      ) : (
+                        <div className="flex aspect-[16/11] w-full flex-col items-center justify-center gap-1.5 px-3 text-center text-slate-400">
+                          <ImageIcon className="h-7 w-7" aria-hidden="true" />
+                          <span className="text-xs">Preview unavailable</span>
+                        </div>
+                      )}
+                    </div>
+                    {canZoom && (
+                      <p className="mt-1.5 text-[11px] text-slate-500 print:hidden">
+                        Click thumbnail to inspect scan details
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="lg:col-span-5 lg:border-l lg:border-slate-200 lg:pl-6">
                     <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-xs sm:grid-cols-2">
                       <div>
                         <dt className="text-slate-500">Full Name</dt>
@@ -231,7 +314,7 @@ export const DocumentFindingsList: React.FC<DocumentFindingsListProps> = ({ audi
                     </dl>
                   </div>
 
-                  <div className="lg:col-span-5 space-y-3 border-t border-slate-200 pt-3 lg:border-t-0 lg:border-l lg:pl-6 lg:pt-0">
+                  <div className="lg:col-span-4 space-y-3 border-t border-slate-200 pt-3 lg:border-t-0 lg:border-l lg:pl-6 lg:pt-0">
                     <div>
                       <p className="text-xs font-semibold text-slate-700">Scan &amp; Validity Notes</p>
                       <p className="mt-1 text-xs text-slate-600">{doc.clarityNotes}</p>
@@ -264,6 +347,45 @@ export const DocumentFindingsList: React.FC<DocumentFindingsListProps> = ({ audi
               </article>
             );
           })}
+        </div>
+      )}
+
+      {zoomedPreview && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="zoomed-preview-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 p-4 print:hidden"
+        >
+          <div className="w-full max-w-3xl rounded-xl border border-slate-200 bg-white p-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div className="min-w-0">
+                <h3
+                  id="zoomed-preview-title"
+                  className="font-display text-base font-bold text-slate-900"
+                >
+                  {zoomedPreview.title}
+                </h3>
+                <p className="truncate text-xs text-slate-500">{zoomedPreview.fileName}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setZoomedPreview(null)}
+                aria-label="Close document preview"
+                className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900 cursor-pointer"
+              >
+                <X className="h-5 w-5" aria-hidden="true" />
+              </button>
+            </div>
+            <div className="mt-3 max-h-[75vh] overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
+              <img
+                src={zoomedPreview.src}
+                alt={`Enlarged preview of ${zoomedPreview.title}`}
+                referrerPolicy="no-referrer"
+                className="mx-auto max-h-[68vh] w-auto object-contain"
+              />
+            </div>
+          </div>
         </div>
       )}
     </section>
