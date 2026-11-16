@@ -1,0 +1,6 @@
+{
+  "name": "DastavezGuard AI",
+  "description": "Strict Indian Government & Academic Document Pre-Submission Compliance Auditor with cross-document discrepancy detection, validity checks, voice briefings, and multi-turn compliance advice.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
