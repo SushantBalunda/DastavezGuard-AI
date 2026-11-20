@@ -1,5 +1,6 @@
 import React from 'react';
 import { X } from 'lucide-react';
+import { SUPPORTED_DOCUMENT_GROUPS } from '../utils/compliance';
 
 interface ComplianceRulesModalProps {
   isOpen: boolean;
@@ -19,10 +20,10 @@ export const ComplianceRulesModal: React.FC<ComplianceRulesModalProps> = ({
       aria-labelledby="rules-modal-title"
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
     >
-      <div className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white p-6 shadow-xl">
+      <div className="max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-xl">
         <div className="flex items-center justify-between border-b border-slate-200 pb-4">
           <h2 id="rules-modal-title" className="font-display text-lg font-bold text-slate-900">
-            DastavezGuard AI Strict Audit Rubric
+            DastavezGuard AI Forensic Audit Rubric
           </h2>
           <button
             type="button"
@@ -50,16 +51,18 @@ export const ComplianceRulesModal: React.FC<ComplianceRulesModalProps> = ({
             <h3 className="font-semibold text-slate-900">2. Critical Blockers (-30 pts each)</h3>
             <ul className="mt-1 list-disc space-y-1 pl-5">
               <li>
+                Missing mandatory documents required by the selected Target Scheme checklist.
+              </li>
+              <li>
                 Cross-document name mismatches (including abbreviations like &quot;Kr.&quot; vs
-                &quot;Kumar&quot; or missing middle names) or Date of Birth conflicts.
+                &quot;Kumar&quot; or missing middle names), PIN code discrepancies, or Date of Birth conflicts.
               </li>
               <li>
-                Expired certificates past their Valid-Till date, or Income / OBC-NCL / EWS
-                certificates older than 1 year (365 days) relative to Today&apos;s Date.
+                Certificates past Valid-Till date, or Family Income / OBC-NCL / EWS certificates
+                issued before <span className="font-mono">2026-04-01</span> (prior Financial Year) for FY 2026–27 schemes.
               </li>
               <li>
-                Unreadable scans marked <span className="font-mono">UNREADABLE</span> due to
-                blurriness, heavy glare, or cropped edges.
+                Invalid 11-character IFSC format on banking proof or <span className="font-mono">UNREADABLE</span> scans.
               </li>
             </ul>
           </div>
@@ -67,17 +70,28 @@ export const ComplianceRulesModal: React.FC<ComplianceRulesModalProps> = ({
           <div>
             <h3 className="font-semibold text-slate-900">3. Minor Warnings (-10 pts each)</h3>
             <ul className="mt-1 list-disc space-y-1 pl-5">
-              <li>Missing or unverified issuing officer stamp or digital signature block.</li>
-              <li>Address phrasing or punctuation differences across documents.</li>
-              <li>Minor edge cropping or localized glare where text remains legible.</li>
+              <li>Missing issuing officer seal, authorized signature, or DigiLocker/e-District QR block.</li>
+              <li>Declared annual income exceeding ₹2.5L scholarship or ₹8.0L OBC-NCL ceilings.</li>
+              <li>Address phrasing differences, cluttered photo background, or minor glare/cropping.</li>
             </ul>
           </div>
 
           <div>
-            <h3 className="font-semibold text-slate-900">4. Privacy &amp; Non-Guessing Policy</h3>
+            <h3 className="font-semibold text-slate-900">4. Supported Document Classes (19 Types)</h3>
+            <div className="mt-2 grid grid-cols-1 gap-2.5 sm:grid-cols-2 text-xs">
+              {SUPPORTED_DOCUMENT_GROUPS.map((grp) => (
+                <div key={grp.group} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <p className="font-semibold text-slate-900">{grp.group}</p>
+                  <p className="mt-1 text-slate-600">{grp.types.join(', ')}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <h3 className="font-semibold text-slate-900">5. Privacy &amp; Non-Guessing Policy</h3>
             <p className="mt-1">
-              The first 8 digits of any 12-digit Aadhaar number are masked as{' '}
-              <span className="font-mono">XXXX-XXXX-last4</span>. Unreadable text is never guessed.
+              The first 8 digits of Aadhaar numbers (<span className="font-mono">XXXX-XXXX-last4</span>) and leading bank account digits (<span className="font-mono">XXXXXXlast4</span>) are masked. Unreadable text is never guessed.
             </p>
           </div>
         </div>

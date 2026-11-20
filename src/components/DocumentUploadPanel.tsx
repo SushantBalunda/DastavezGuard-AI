@@ -9,7 +9,7 @@ import {
   FolderOpen,
 } from 'lucide-react';
 import type { UploadedDocFile } from '../types/audit';
-import { TARGET_SCHEMES } from '../utils/compliance';
+import { SCHEME_CHECKLISTS, TARGET_SCHEMES } from '../utils/compliance';
 
 interface DocumentUploadPanelProps {
   files: UploadedDocFile[];
@@ -75,13 +75,17 @@ export const DocumentUploadPanel: React.FC<DocumentUploadPanelProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [uploadNotice, setUploadNotice] = useState<string | null>(null);
 
+  const checklistRules = SCHEME_CHECKLISTS[targetScheme] ?? [];
+
   const handleSelectedFiles = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
     setUploadNotice(null);
 
-    const remainingSlots = 4 - files.length;
+    const remainingSlots = 6 - files.length;
     if (remainingSlots <= 0) {
-      setUploadNotice('Maximum of 4 documents allowed per pre-submission audit. Remove one to add another.');
+      setUploadNotice(
+        'Maximum of 6 documents allowed per pre-submission audit. Remove one to add another.',
+      );
       return;
     }
 
@@ -110,7 +114,7 @@ export const DocumentUploadPanel: React.FC<DocumentUploadPanelProps> = ({
     const sliced = validFiles.slice(0, remainingSlots);
     if (validFiles.length > remainingSlots) {
       setUploadNotice(
-        `Only ${remainingSlots} slot(s) remained; extra files beyond the 4-document cap were skipped.`,
+        `Only ${remainingSlots} slot(s) remained; extra files beyond the 6-document cap were skipped.`,
       );
     }
 
@@ -145,16 +149,16 @@ export const DocumentUploadPanel: React.FC<DocumentUploadPanelProps> = ({
       <div className="flex flex-col gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-medium tracking-wide text-slate-500">
-            Pre-Submission Compliance Workbench
+            Pre-Submission Forensic Compliance Workbench
           </p>
           <h1
             id="workbench-heading"
             className="mt-1 font-display text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl text-balance"
           >
-            Audit identity, academic &amp; category records before portal lock
+            Audit identity, academic, financial &amp; category records before portal lock
           </h1>
           <p className="mt-1.5 max-w-2xl text-sm text-slate-600">
-            Upload 1 to 4 documents (JPG, PNG, WEBP, or PDF). DastavezGuard AI checks cross-document spelling consistency, certificate expiry against Today&apos;s Date, Aadhaar masking, and scan legibility.
+            Upload 1 to 6 documents (JPG, PNG, WEBP, or PDF). DastavezGuard AI auto-classifies 19 document types, verifies mandatory scheme checklists, inspects QR/seal signals, and flags FY 2026–27 expiry and character-level mismatches.
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -190,17 +194,32 @@ export const DocumentUploadPanel: React.FC<DocumentUploadPanelProps> = ({
               </option>
             ))}
           </select>
-          {targetScheme === 'Custom Scheme' && (
+
+          <p className="mt-2 text-xs text-slate-600">
+            {checklistRules.length > 0 ? (
+              <>
+                <span className="font-semibold text-slate-800">Mandatory Checklist: </span>
+                {checklistRules.map((r) => r.label).join(' · ')}
+              </>
+            ) : (
+              <>
+                <span className="font-semibold text-slate-800">General Cross-Check: </span>
+                Cross-checks all uploaded files without enforcing a fixed mandatory document list.
+              </>
+            )}
+          </p>
+
+          {targetScheme === 'Custom / General Document Cross-Check' && (
             <div className="mt-2.5">
               <label htmlFor="custom-scheme-input" className="sr-only">
-                Custom Target Scheme Name
+                Optional Custom Target Portal Label
               </label>
               <input
                 id="custom-scheme-input"
                 type="text"
                 value={customScheme}
                 onChange={(e) => onCustomSchemeChange(e.target.value)}
-                placeholder="e.g., GATE 2027 Admission / State PSC Verification"
+                placeholder="Optional custom label (e.g., UPSC CSE / GATE 2027 / State PSC)"
                 className="block w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-700/15"
               />
             </div>
@@ -212,7 +231,7 @@ export const DocumentUploadPanel: React.FC<DocumentUploadPanelProps> = ({
             htmlFor="today-date-input"
             className="block text-sm font-medium text-slate-800"
           >
-            Today&apos;s Date (Validity Reference)
+            Today&apos;s Date (FY 2026–27 Validity Reference)
           </label>
           <input
             id="today-date-input"
@@ -221,13 +240,16 @@ export const DocumentUploadPanel: React.FC<DocumentUploadPanelProps> = ({
             onChange={(e) => onTodayDateChange(e.target.value)}
             className="mt-1.5 block w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 font-mono text-sm text-slate-900 tabular-nums focus:border-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-700/15"
           />
+          <p className="mt-2 text-xs text-slate-500">
+            Income &amp; OBC-NCL/EWS certificates issued before April 1, 2026 are flagged as prior-FY expired.
+          </p>
         </div>
       </div>
 
       <div className="mt-6">
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium text-slate-800">
-            Document Batch ({files.length} / 4 slots filled)
+            Document Batch ({files.length} / 6 slots filled)
           </span>
           {files.length > 0 && (
             <button
@@ -269,7 +291,7 @@ export const DocumentUploadPanel: React.FC<DocumentUploadPanelProps> = ({
           />
           <Upload className="mx-auto h-7 w-7 text-slate-400" aria-hidden="true" />
           <p className="mt-2 text-sm font-medium text-slate-800">
-            Drag and drop 1–4 scans or PDFs here, or{' '}
+            Drag and drop 1–6 scans or PDFs here, or{' '}
             <label
               htmlFor="doc-file-upload"
               className="text-blue-700 underline underline-offset-4 hover:text-blue-800 cursor-pointer"
@@ -278,7 +300,7 @@ export const DocumentUploadPanel: React.FC<DocumentUploadPanelProps> = ({
             </label>
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            Supports Aadhaar, Class X/XII Marksheets, Income/OBC-NCL/EWS/Caste Certificates, Photos &amp; Signatures (JPG, PNG, WEBP, PDF)
+            Supports Aadhaar, PAN, APAAR/ABC, Voter ID, Driving Licence, Passport, Class X/XII/College Marksheets, Bonafide, Fee Receipt, TC/Migration, Income, Caste/OBC-NCL/EWS, Domicile, UDID, Bank Passbook/Cheque, Photo &amp; Signature (JPG, PNG, WEBP, PDF)
           </p>
         </div>
 
@@ -295,7 +317,7 @@ export const DocumentUploadPanel: React.FC<DocumentUploadPanelProps> = ({
         {files.length > 0 && (
           <div
             data-testid="uploaded-files-grid"
-            className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"
+            className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
           >
             {files.map((doc, idx) => (
               <div
@@ -361,7 +383,7 @@ export const DocumentUploadPanel: React.FC<DocumentUploadPanelProps> = ({
       <div className="mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-slate-200 pt-5">
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <ImageIcon className="h-4 w-4 text-slate-400" aria-hidden="true" />
-          <span>Aadhaar numbers are masked (XXXX-XXXX-last4) in all extracted outputs.</span>
+          <span>Aadhaar (XXXX-XXXX-last4) &amp; Bank Account numbers are automatically masked in all outputs.</span>
         </div>
 
         <button
@@ -371,7 +393,7 @@ export const DocumentUploadPanel: React.FC<DocumentUploadPanelProps> = ({
           className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-60 transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700"
         >
           {isAuditing && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
-          <span>{isAuditing ? 'Analyzing Documents...' : 'Run Compliance Audit'}</span>
+          <span>{isAuditing ? 'Running Forensic Audit...' : 'Run Compliance Audit'}</span>
         </button>
       </div>
     </section>

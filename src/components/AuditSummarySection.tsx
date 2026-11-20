@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
+  Download,
   Loader2,
   Mail,
   MessageSquare,
@@ -13,6 +14,7 @@ import {
 } from 'lucide-react';
 import type { ComplianceAuditResult } from '../types/audit';
 import {
+  buildAuditReportExportText,
   buildComplianceMailtoUrl,
   buildTtsBriefingScript,
 } from '../utils/compliance';
@@ -86,6 +88,24 @@ export const AuditSummarySection: React.FC<AuditSummarySectionProps> = ({
     }
   };
 
+  const handleDownloadReport = () => {
+    const content = buildAuditReportExportText(audit);
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const slug = audit.targetScheme
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 40);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `DastavezGuard-Audit-${slug || 'report'}-${audit.auditDate}.txt`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  };
+
   const tierStyle =
     audit.readinessTier === 'Ready to Submit'
       ? {
@@ -114,7 +134,7 @@ export const AuditSummarySection: React.FC<AuditSummarySectionProps> = ({
       data-testid="audit-summary-section"
       className="rounded-xl border border-slate-200 bg-white p-6"
     >
-      <div className="flex flex-col gap-4 border-b border-slate-200 pb-5 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-4 border-b border-slate-200 pb-5">
         <div>
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
             <span>{audit.targetScheme}</span>
@@ -158,6 +178,15 @@ export const AuditSummarySection: React.FC<AuditSummarySectionProps> = ({
                     : 'Play Briefing'
                   : 'Listen to Audit Briefing'}
             </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleDownloadReport}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <Download className="h-4 w-4 text-slate-600" aria-hidden="true" />
+            <span>Download Audit Report</span>
           </button>
 
           <button

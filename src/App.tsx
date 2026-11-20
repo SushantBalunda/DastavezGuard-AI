@@ -3,14 +3,16 @@ import { MessageSquare, ShieldCheck } from 'lucide-react';
 import { HeaderBar } from './components/HeaderBar';
 import { AuditProgressStepper } from './components/AuditProgressStepper';
 import { DocumentUploadPanel } from './components/DocumentUploadPanel';
+import { RecentAuditsPanel } from './components/RecentAuditsPanel';
+import { MissingDocumentsBanner } from './components/MissingDocumentsBanner';
 import { AuditSummarySection } from './components/AuditSummarySection';
 import { DiscrepancyMatrix } from './components/DiscrepancyMatrix';
 import { DocumentFindingsList } from './components/DocumentFindingsList';
 import { ComplianceAdvisorChat } from './components/ComplianceAdvisorChat';
 import { ComplianceRulesModal } from './components/ComplianceRulesModal';
-import { RecentAuditsPanel } from './components/RecentAuditsPanel';
 import type { ComplianceAuditResult, UploadedDocFile } from './types/audit';
 import {
+  evaluateSchemeChecklist,
   getAuditWorkflowStage,
   getSampleAuditCase,
   TARGET_SCHEMES,
@@ -27,7 +29,7 @@ export default function App() {
   const [files, setFiles] = useState<UploadedDocFile[]>([]);
   const [targetScheme, setTargetScheme] = useState<string>(TARGET_SCHEMES[0]);
   const [customScheme, setCustomScheme] = useState<string>('');
-  const [todayDate, setTodayDate] = useState<string>('2026-11-15');
+  const [todayDate, setTodayDate] = useState<string>('2026-11-18');
   const [auditResult, setAuditResult] = useState<ComplianceAuditResult | null>(null);
   const [isAuditing, setIsAuditing] = useState<boolean>(false);
   const [auditError, setAuditError] = useState<string | null>(null);
@@ -51,10 +53,12 @@ export default function App() {
   };
 
   const effectiveScheme =
-    targetScheme === 'Custom Scheme' ? customScheme.trim() : targetScheme.trim();
+    targetScheme === 'Custom / General Document Cross-Check'
+      ? customScheme.trim() || targetScheme
+      : targetScheme.trim();
 
   const handleFilesAdd = (newFiles: UploadedDocFile[]) => {
-    setFiles((prev) => [...prev, ...newFiles].slice(0, 4));
+    setFiles((prev) => [...prev, ...newFiles].slice(0, 6));
     setValidationError(null);
     setAuditError(null);
   };
@@ -90,14 +94,9 @@ export default function App() {
 
     if (files.length === 0) {
       setValidationError(
-        'Please upload 1 to 4 documents (or click "Load Sample Case") before running a compliance audit.',
+        'Please upload 1 to 6 documents (or click "Load Sample Case") before running a compliance audit.',
       );
       document.getElementById('workbench')?.scrollIntoView({ behavior: 'smooth' });
-      return;
-    }
-
-    if (!effectiveScheme) {
-      setValidationError('Please enter a Custom Target Scheme name before running the audit.');
       return;
     }
 
@@ -170,6 +169,18 @@ export default function App() {
       saveRecentAuditsToStorage(window.localStorage, []);
     }
   };
+
+  const handleJumpToUpload = () => {
+    document.getElementById('workbench')?.scrollIntoView({ behavior: 'smooth' });
+    setTimeout(() => {
+      document.getElementById('doc-file-upload')?.focus();
+    }, 250);
+  };
+
+  const activeMissingMandatoryDocs = auditResult
+    ? (auditResult.missingMandatoryDocuments ??
+        evaluateSchemeChecklist(auditResult.targetScheme, auditResult.documents))
+    : [];
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col">
@@ -251,7 +262,7 @@ export default function App() {
               No Audit Report Generated Yet
             </h2>
             <p className="mx-auto mt-1.5 max-w-lg text-sm text-slate-600">
-              Upload 1–4 scans or PDFs above and click &quot;Run Compliance Audit&quot;, or load our realistic 3-document Indian portal sample case to inspect cross-document mismatch detection.
+              Upload 1–6 scans or PDFs above and click &quot;Run Compliance Audit&quot;, or load our 4-document NSP sample case to inspect missing-document alerts, deep forensic metadata, and character-level mismatches.
             </p>
             <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
               <button
@@ -275,6 +286,11 @@ export default function App() {
 
         {!isAuditing && auditResult && (
           <>
+            <MissingDocumentsBanner
+              targetScheme={auditResult.targetScheme}
+              missingDocuments={activeMissingMandatoryDocs}
+              onJumpToUpload={handleJumpToUpload}
+            />
             <AuditSummarySection
               audit={auditResult}
               onOpenAdvisor={() => setIsAdvisorOpen(true)}

@@ -1,14 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildAuditReportExportText,
   buildComplianceMailtoUrl,
+  buildFieldComparisonRows,
   calculateReadinessScore,
   checkCertificateValidity,
   comparePersonNames,
+  evaluateIncomeThresholds,
+  evaluateSchemeChecklist,
   getAuditWorkflowStage,
   getSampleAuditCase,
   maskAadhaarNumber,
+  maskBankAccountNumber,
   matchUploadedFileForDocument,
+  validateIfscCode,
 } from './compliance';
 import type { UploadedDocFile } from '../types/audit';
 
@@ -19,10 +25,10 @@ test('buildComplianceMailtoUrl encodes score, scheme, and discrepancies into mai
   assert.ok(mailtoUrl.includes('&body='));
   assert.ok(!mailtoUrl.includes('+'));
   const decoded = decodeURIComponent(mailtoUrl);
-  assert.ok(decoded.includes('20 / 100'));
+  assert.ok(decoded.includes('0 / 100'));
   assert.ok(decoded.includes('High Rejection Risk'));
-  assert.ok(decoded.includes('UPSC Civil Services Examination (CSE)'));
-  assert.ok(decoded.includes('Aarav Kr. Sharma'));
+  assert.ok(decoded.includes('National Scholarship Portal (NSP)'));
+  assert.ok(decoded.includes('Bonafide Student Certificate'));
 });
 
 test('matchUploadedFileForDocument correlates uploaded files by index and filename', () => {
@@ -57,11 +63,70 @@ test('getAuditWorkflowStage transitions through upload, processing, and review',
   assert.equal(getAuditWorkflowStage(false, true), 'review');
 });
 
-test('maskAadhaarNumber masks first 8 digits of 12-digit Aadhaar IDs', () => {
+test('maskAadhaarNumber and maskBankAccountNumber mask sensitive leading digits', () => {
   assert.equal(maskAadhaarNumber('4829 7310 9184', 'Aadhaar Card'), 'XXXX-XXXX-9184');
   assert.equal(maskAadhaarNumber('482973109184', 'Aadhaar Card'), 'XXXX-XXXX-9184');
-  assert.equal(maskAadhaarNumber('1245890', 'Class X Marksheet'), '1245890');
+  assert.equal(maskAadhaarNumber('1245890', 'Class X Marksheet/Certificate'), '1245890');
   assert.equal(maskAadhaarNumber(null, 'Aadhaar Card'), null);
+
+  assert.equal(maskBankAccountNumber('309184777392'), 'XXXXXXXX7392');
+  assert.equal(maskBankAccountNumber('1234'), '1234');
+  assert.equal(maskBankAccountNumber(null), null);
+});
+
+test('validateIfscCode validates 11-character Indian IFSC format', () => {
+  assert.deepEqual(validateIfscCode('sbin0004821'), {
+    normalized: 'SBIN0004821',
+    isValid: true,
+  });
+  assert.deepEqual(validateIfscCode('HDFC1234567'), {
+    normalized: 'HDFC1234567',
+    isValid: false,
+  });
+  assert.deepEqual(validateIfscCode('SBIN0048'), {
+    normalized: 'SBIN0048',
+    isValid: false,
+  });
+  assert.deepEqual(validateIfscCode(null), {
+    normalized: null,
+    isValid: null,
+  });
+});
+
+test('evaluateIncomeThresholds flags ₹2.5L and ₹8L ceilings', () => {
+  assert.equal(evaluateIncomeThresholds('Family Income Certificate', 240000), null);
+  assert.ok(
+    evaluateIncomeThresholds('Family Income Certificate', 285000)?.includes('₹2.5L'),
+  );
+  assert.ok(
+    evaluateIncomeThresholds('Family Income Certificate', 850000)?.includes('₹8.0L'),
+  );
+  assert.equal(evaluateIncomeThresholds('Class X Marksheet/Certificate', 900000), null);
+});
+
+test('evaluateSchemeChecklist detects missing mandatory documents per scheme', () => {
+  const nspMissing = evaluateSchemeChecklist('National Scholarship Portal (NSP)', [
+    { documentType: 'Aadhaar Card' },
+    { documentType: 'Class X Marksheet/Certificate' },
+  ]);
+  assert.equal(nspMissing.length, 3);
+  assert.ok(nspMissing.some((m) => m.requirementKey === 'nsp-income'));
+  assert.ok(nspMissing.some((m) => m.requirementKey === 'nsp-bonafide-fee'));
+  assert.ok(nspMissing.some((m) => m.requirementKey === 'nsp-bank'));
+
+  const nspComplete = evaluateSchemeChecklist('National Scholarship Portal (NSP)', [
+    { documentType: 'Aadhaar Card' },
+    { documentType: 'Class XII Marksheet/Certificate' },
+    { documentType: 'Family Income Certificate' },
+    { documentType: 'Current Year Fee Receipt' },
+    { documentType: 'Bank Passbook Front Page / Cancelled Cheque' },
+  ]);
+  assert.equal(nspComplete.length, 0);
+
+  const customMissing = evaluateSchemeChecklist('Custom / General Document Cross-Check', [
+    { documentType: 'PAN Card' },
+  ]);
+  assert.equal(customMissing.length, 0);
 });
 
 test('comparePersonNames catches Kr. vs Kumar and missing middle name differences', () => {
@@ -78,36 +143,45 @@ test('comparePersonNames catches Kr. vs Kumar and missing middle name difference
   assert.equal(mismatchResult.status, 'MISMATCH');
 });
 
-test('checkCertificateValidity flags expired income/OBC-NCL certificates older than 1 year or past valid-till', () => {
+test('checkCertificateValidity flags pre-April 1 2026 FY certificates and expired dates', () => {
+  const preAprilFy = checkCertificateValidity(
+    'Family Income Certificate',
+    '2026-02-14',
+    null,
+    '2026-11-18',
+  );
+  assert.equal(preAprilFy.status, 'EXPIRED');
+  assert.ok(preAprilFy.notes.includes('2026-04-01'));
+
   const pastValidTill = checkCertificateValidity(
-    'Income Certificate',
+    'Family Income Certificate',
     '2025-04-10',
     '2026-04-09',
-    '2026-11-15',
+    '2026-11-18',
   );
   assert.equal(pastValidTill.status, 'EXPIRED');
 
-  const olderThanOneYear = checkCertificateValidity(
+  const obcOld = checkCertificateValidity(
     'OBC-NCL Certificate',
-    '2025-01-01',
+    '2026-03-31',
     null,
-    '2026-11-15',
+    '2026-11-18',
   );
-  assert.equal(olderThanOneYear.status, 'EXPIRED');
+  assert.equal(obcOld.status, 'EXPIRED');
 
-  const validRecent = checkCertificateValidity(
-    'Income Certificate',
+  const validCurrentFy = checkCertificateValidity(
+    'Family Income Certificate',
     '2026-08-01',
     '2027-07-31',
-    '2026-11-15',
+    '2026-11-18',
   );
-  assert.equal(validRecent.status, 'VALID');
+  assert.equal(validCurrentFy.status, 'VALID');
 
   const marksheet = checkCertificateValidity(
-    'Class X Marksheet',
+    'Class X Marksheet/Certificate',
     '2019-05-06',
     null,
-    '2026-11-15',
+    '2026-11-18',
   );
   assert.equal(marksheet.status, 'NOT_APPLICABLE');
 });
@@ -129,4 +203,26 @@ test('calculateReadinessScore deducts 30 per critical blocker and 10 per minor w
     score: 0,
     tier: 'High Rejection Risk',
   });
+});
+
+test('buildFieldComparisonRows highlights character-level spelling diffs and buildAuditReportExportText exports full breakdown', () => {
+  const sample = getSampleAuditCase().auditResult;
+  const rows = buildFieldComparisonRows(sample.documents);
+  const fullNameRow = rows.find((r) => r.key === 'fullName');
+  assert.ok(fullNameRow);
+  assert.equal(fullNameRow.rowStatus, 'WARNING');
+  const aadhaarCell = fullNameRow.cells.find((c) => c.documentIndex === 1);
+  assert.ok(aadhaarCell);
+  assert.ok(aadhaarCell.segments.some((s) => s.kind === 'diff'));
+
+  const bankHolderRow = rows.find((r) => r.key === 'accountHolderName');
+  assert.ok(bankHolderRow);
+  assert.equal(bankHolderRow.rowStatus, 'WARNING');
+
+  const exported = buildAuditReportExportText(sample);
+  assert.ok(exported.includes('SCHEME MANDATORY DOCUMENT CHECKLIST'));
+  assert.ok(exported.includes('SBIN0004821'));
+  assert.ok(exported.includes('XXXXXX7392'));
+  assert.ok(exported.includes('Office of the Tehsildar'));
+  assert.ok(exported.includes('Central Board of Secondary Education'));
 });

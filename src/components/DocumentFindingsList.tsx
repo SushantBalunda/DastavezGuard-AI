@@ -2,6 +2,8 @@ import React, { useMemo, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Eye,
   FileText,
   Image as ImageIcon,
@@ -12,6 +14,8 @@ import {
 import type {
   AuditedDocument,
   ComplianceAuditResult,
+  DeepExtractedMetadata,
+  ForensicSignals,
   UploadedDocFile,
 } from '../types/audit';
 import { matchUploadedFileForDocument } from '../utils/compliance';
@@ -44,16 +48,30 @@ function getDocumentSeverity(doc: AuditedDocument): 'CRITICAL' | 'WARNING' | 'VE
   return 'VERIFIED';
 }
 
+function formatBooleanSignal(val: boolean | null | undefined): string {
+  if (val === true) return 'Present / Verified';
+  if (val === false) return 'Absent / Missing';
+  return 'Not Applicable';
+}
+
 export const DocumentFindingsList: React.FC<DocumentFindingsListProps> = ({
   audit,
   uploadedFiles,
 }) => {
   const [filter, setFilter] = useState<FilterMode>('ALL');
+  const [expandedDocs, setExpandedDocs] = useState<Record<number, boolean>>({});
   const [zoomedPreview, setZoomedPreview] = useState<{
     title: string;
     fileName: string;
     src: string;
   } | null>(null);
+
+  const toggleExpandDoc = (docIndex: number) => {
+    setExpandedDocs((prev) => ({
+      ...prev,
+      [docIndex]: !prev[docIndex],
+    }));
+  };
 
   const counts = useMemo(() => {
     let critical = 0;
@@ -80,7 +98,7 @@ export const DocumentFindingsList: React.FC<DocumentFindingsListProps> = ({
     >
       <div className="flex flex-col gap-4 border-b border-slate-200 pb-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-xs font-medium text-slate-500">Per-Document Extraction &amp; Quality</p>
+          <p className="text-xs font-medium text-slate-500">Per-Document Forensic Extraction &amp; Quality</p>
           <h2
             id="document-findings-heading"
             className="mt-1 font-display text-xl font-bold text-slate-900"
@@ -134,6 +152,33 @@ export const DocumentFindingsList: React.FC<DocumentFindingsListProps> = ({
             );
             const isPdf = matchedFile?.mimeType === 'application/pdf';
             const canZoom = Boolean(matchedFile && !isPdf && matchedFile.previewUrl);
+            const isExpanded = Boolean(expandedDocs[doc.documentIndex]);
+            const dm: Partial<DeepExtractedMetadata> = doc.deepMetadata ?? {};
+            const fs: Partial<ForensicSignals> = doc.forensicSignals ?? {};
+            const confidence =
+              typeof fs.confidenceScore === 'number' ? fs.confidenceScore : null;
+
+            const hasAcademicFields = Boolean(
+              dm.boardOrUniversityName ||
+                dm.rollNumber ||
+                dm.passingYear ||
+                dm.aggregatePercentageOrCgpa,
+            );
+            const hasCertFields = Boolean(
+              dm.certificateOrApplicationNumber ||
+                dm.issuingAuthority ||
+                dm.financialYear ||
+                (dm.annualIncomeAmountInr !== null && dm.annualIncomeAmountInr !== undefined),
+            );
+            const hasBankFields = Boolean(
+              dm.accountHolderName ||
+                dm.maskedAccountNumber ||
+                dm.ifscCode ||
+                dm.bankAndBranchName,
+            );
+            const hasMediaFields = Boolean(
+              dm.backgroundCheck || dm.faceVisibility || dm.signatureInkClarity,
+            );
 
             return (
               <article
@@ -155,6 +200,15 @@ export const DocumentFindingsList: React.FC<DocumentFindingsListProps> = ({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-4 text-xs">
+                    {confidence !== null && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-slate-500">Confidence:</span>
+                        <span className="font-mono font-semibold text-slate-900 tabular-nums">
+                          {confidence}/100
+                        </span>
+                      </div>
+                    )}
+
                     <div className="flex items-center gap-1.5">
                       <Eye className="h-3.5 w-3.5 text-slate-500" aria-hidden="true" />
                       <span className="text-slate-500">Clarity:</span>
@@ -306,9 +360,13 @@ export const DocumentFindingsList: React.FC<DocumentFindingsListProps> = ({
                         </dd>
                       </div>
                       <div className="sm:col-span-2">
-                        <dt className="text-slate-500">Address</dt>
+                        <dt className="text-slate-500">Address &amp; PIN Code</dt>
                         <dd className="mt-0.5 font-mono text-slate-800">
                           {doc.extractedFields.address || 'Not Extracted'}
+                          {doc.extractedFields.pinCode &&
+                            !doc.extractedFields.address?.includes(doc.extractedFields.pinCode) && (
+                              <span> (PIN {doc.extractedFields.pinCode})</span>
+                            )}
                         </dd>
                       </div>
                     </dl>
@@ -343,6 +401,245 @@ export const DocumentFindingsList: React.FC<DocumentFindingsListProps> = ({
                       </div>
                     )}
                   </div>
+                </div>
+
+                <div className="border-t border-slate-200 bg-slate-50/50 px-4 py-2.5">
+                  <button
+                    type="button"
+                    aria-expanded={isExpanded}
+                    onClick={() => toggleExpandDoc(doc.documentIndex)}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-700 hover:text-blue-800 transition-colors cursor-pointer print:hidden"
+                  >
+                    {isExpanded ? (
+                      <ChevronUp className="h-4 w-4" aria-hidden="true" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4" aria-hidden="true" />
+                    )}
+                    <span>
+                      {isExpanded ? 'Hide Deep Extracted Metadata' : 'View Deep Extracted Metadata'}
+                    </span>
+                  </button>
+
+                  {isExpanded && (
+                    <div
+                      data-testid={`deep-metadata-panel-${doc.documentIndex}`}
+                      className="mt-3 grid grid-cols-1 gap-5 border-t border-slate-200 pt-3.5 text-xs md:grid-cols-2"
+                    >
+                      <div className="space-y-3">
+                        <h4 className="font-semibold text-slate-900">
+                          Document-Specific Deep Fields
+                        </h4>
+
+                        {!hasAcademicFields && !hasCertFields && !hasBankFields && !hasMediaFields && (
+                          <p className="text-slate-500">
+                            No additional academic, financial, or certificate-specific fields detected for this document class.
+                          </p>
+                        )}
+
+                        {hasAcademicFields && (
+                          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border border-slate-200 bg-white p-3">
+                            <div className="col-span-2">
+                              <dt className="text-slate-500">Board / University Name</dt>
+                              <dd className="mt-0.5 font-mono font-medium text-slate-900">
+                                {dm.boardOrUniversityName || '—'}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt className="text-slate-500">Roll Number</dt>
+                              <dd className="mt-0.5 font-mono font-medium text-slate-900 tabular-nums">
+                                {dm.rollNumber || '—'}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt className="text-slate-500">Passing Year</dt>
+                              <dd className="mt-0.5 font-mono font-medium text-slate-900 tabular-nums">
+                                {dm.passingYear || '—'}
+                              </dd>
+                            </div>
+                            <div className="col-span-2">
+                              <dt className="text-slate-500">Aggregate Percentage / CGPA</dt>
+                              <dd className="mt-0.5 font-mono font-medium text-slate-900 tabular-nums">
+                                {dm.aggregatePercentageOrCgpa || '—'}
+                              </dd>
+                            </div>
+                          </dl>
+                        )}
+
+                        {hasCertFields && (
+                          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border border-slate-200 bg-white p-3">
+                            <div>
+                              <dt className="text-slate-500">Certificate / App No.</dt>
+                              <dd className="mt-0.5 font-mono font-medium text-slate-900 tabular-nums">
+                                {dm.certificateOrApplicationNumber || '—'}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt className="text-slate-500">Financial Year</dt>
+                              <dd className="mt-0.5 font-mono font-medium text-slate-900 tabular-nums">
+                                {dm.financialYear || '—'}
+                              </dd>
+                            </div>
+                            <div className="col-span-2">
+                              <dt className="text-slate-500">Issuing Authority</dt>
+                              <dd className="mt-0.5 font-medium text-slate-900">
+                                {dm.issuingAuthority || '—'}
+                              </dd>
+                            </div>
+                            {dm.annualIncomeAmountInr !== null &&
+                              dm.annualIncomeAmountInr !== undefined && (
+                                <div className="col-span-2">
+                                  <dt className="text-slate-500">Annual Family Income</dt>
+                                  <dd className="mt-0.5 font-mono font-semibold text-slate-900 tabular-nums">
+                                    ₹{dm.annualIncomeAmountInr.toLocaleString('en-IN')}
+                                  </dd>
+                                  {dm.incomeThresholdAlert && (
+                                    <p className="mt-1 font-medium text-amber-800">
+                                      {dm.incomeThresholdAlert}
+                                    </p>
+                                  )}
+                                </div>
+                              )}
+                          </dl>
+                        )}
+
+                        {hasBankFields && (
+                          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border border-slate-200 bg-white p-3">
+                            <div className="col-span-2">
+                              <dt className="text-slate-500">Account Holder Name</dt>
+                              <dd className="mt-0.5 font-mono font-medium text-slate-900">
+                                {dm.accountHolderName || '—'}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt className="text-slate-500">Masked Account No.</dt>
+                              <dd className="mt-0.5 font-mono font-medium text-slate-900 tabular-nums">
+                                {dm.maskedAccountNumber || '—'}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt className="text-slate-500">IFSC Code</dt>
+                              <dd className="mt-0.5 font-mono font-medium tabular-nums">
+                                <span
+                                  className={
+                                    dm.ifscValidFormat === false
+                                      ? 'text-red-700 font-semibold'
+                                      : 'text-slate-900'
+                                  }
+                                >
+                                  {dm.ifscCode || '—'}
+                                </span>
+                                {dm.ifscValidFormat === true && (
+                                  <span className="ml-1.5 text-emerald-700 font-sans font-medium">
+                                    (Valid 11-char)
+                                  </span>
+                                )}
+                                {dm.ifscValidFormat === false && (
+                                  <span className="ml-1.5 text-red-700 font-sans font-semibold">
+                                    (Invalid IFSC)
+                                  </span>
+                                )}
+                              </dd>
+                            </div>
+                            <div className="col-span-2">
+                              <dt className="text-slate-500">Bank &amp; Branch Name</dt>
+                              <dd className="mt-0.5 font-medium text-slate-900">
+                                {dm.bankAndBranchName || '—'}
+                              </dd>
+                            </div>
+                          </dl>
+                        )}
+
+                        {hasMediaFields && (
+                          <dl className="grid grid-cols-1 gap-2 rounded-md border border-slate-200 bg-white p-3">
+                            {dm.backgroundCheck && (
+                              <div>
+                                <dt className="text-slate-500">Background Check</dt>
+                                <dd className="mt-0.5 font-medium text-slate-900">
+                                  {dm.backgroundCheck}
+                                </dd>
+                              </div>
+                            )}
+                            {dm.faceVisibility && (
+                              <div>
+                                <dt className="text-slate-500">Face Visibility</dt>
+                                <dd className="mt-0.5 font-medium text-slate-900">
+                                  {dm.faceVisibility}
+                                </dd>
+                              </div>
+                            )}
+                            {dm.signatureInkClarity && (
+                              <div>
+                                <dt className="text-slate-500">Signature Ink Clarity</dt>
+                                <dd className="mt-0.5 font-medium text-slate-900">
+                                  {dm.signatureInkClarity}
+                                </dd>
+                              </div>
+                            )}
+                          </dl>
+                        )}
+                      </div>
+
+                      <div className="space-y-3">
+                        <h4 className="font-semibold text-slate-900">
+                          Forensic Authenticity &amp; Tamper Signals
+                        </h4>
+                        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border border-slate-200 bg-white p-3">
+                          <div>
+                            <dt className="text-slate-500">Official Seal / Stamp</dt>
+                            <dd
+                              className={`mt-0.5 font-medium ${
+                                fs.officialSealOrStampPresent === false
+                                  ? 'text-amber-800'
+                                  : 'text-slate-900'
+                              }`}
+                            >
+                              {formatBooleanSignal(fs.officialSealOrStampPresent)}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-slate-500">Authorized Signature</dt>
+                            <dd
+                              className={`mt-0.5 font-medium ${
+                                fs.authorizedSignaturePresent === false
+                                  ? 'text-amber-800'
+                                  : 'text-slate-900'
+                              }`}
+                            >
+                              {formatBooleanSignal(fs.authorizedSignaturePresent)}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-slate-500">DigiLocker / e-District QR</dt>
+                            <dd className="mt-0.5 font-medium text-slate-900">
+                              {formatBooleanSignal(fs.qrOrDigitalVerificationPresent)}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-slate-500">Confidence Score</dt>
+                            <dd className="mt-0.5 font-mono font-semibold text-slate-900 tabular-nums">
+                              {confidence !== null ? `${confidence} / 100` : '—'}
+                            </dd>
+                          </div>
+                          <div className="col-span-2 border-t border-slate-100 pt-2">
+                            <dt className="text-slate-500">Tamper / Alignment Anomalies</dt>
+                            <dd className="mt-1">
+                              {fs.tamperOrLayoutAnomalies && fs.tamperOrLayoutAnomalies.length > 0 ? (
+                                <ul className="list-disc space-y-1 pl-4 text-amber-800">
+                                  {fs.tamperOrLayoutAnomalies.map((anom, idx) => (
+                                    <li key={idx}>{anom}</li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <span className="text-emerald-700 font-medium">
+                                  None detected
+                                </span>
+                              )}
+                            </dd>
+                          </div>
+                        </dl>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </article>
             );

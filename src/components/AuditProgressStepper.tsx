@@ -20,7 +20,7 @@ const STEPS: StepDefinition[] = [
     id: 'upload',
     number: '01',
     label: 'Upload Docs',
-    sublabel: '1–4 scans or PDFs',
+    sublabel: '1–6 scans or PDFs',
   },
   {
     id: 'processing',

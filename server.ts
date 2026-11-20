@@ -7,14 +7,19 @@ import { GoogleGenAI, ThinkingLevel, Type, type Content, type Part } from '@goog
 import {
   calculateReadinessScore,
   checkCertificateValidity,
+  evaluateIncomeThresholds,
+  evaluateSchemeChecklist,
+  extractIndianPinCode,
   maskAadhaarNumber,
-} from './src/utils/compliance';
+  maskBankAccountNumber,
+  validateIfscCode,
+} from './src/utils/compliance.ts';
 import type {
   AuditedDocument,
   ChatModelId,
   ComplianceAuditResult,
   ScoreDeduction,
-} from './src/types/audit';
+} from './src/types/audit.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -100,16 +105,31 @@ function formatGeminiError(err: unknown): { status: number; message: string } {
   };
 }
 
-const AUDIT_SYSTEM_INSTRUCTION = `You are DastavezGuard AI, a strict Indian Government & Academic Document Pre-Submission Compliance Auditor.
-You will receive 1 to 4 uploaded documents (images or PDFs) along with a Target Scheme Name and Today's Date.
+const AUDIT_SYSTEM_INSTRUCTION = `You are DastavezGuard AI, a strict Indian Government, Financial, and Academic Document Pre-Submission Forensic Compliance Auditor.
+You will receive 1 to 6 uploaded documents (images or PDFs) along with a Target Scheme Name and Today's Date.
 
 Your job is to:
-1. Identify each uploaded document type (e.g., Aadhaar Card, Class X Marksheet, Class XII Marksheet, Income Certificate, Caste Certificate, OBC-NCL Certificate, EWS Certificate, Domicile Certificate, PAN Card, Passport Photo, Signature, Unidentified).
-2. Extract key identity fields from every document: Full Name, Father/Mother Name, Date of Birth (YYYY-MM-DD), Gender, Address, ID/Certificate Number (mask first 8 digits if Aadhaar, e.g. XXXX-XXXX-1234), Issue Date (YYYY-MM-DD), Expiry/Valid-Till Date (YYYY-MM-DD), and Presence of Official Stamp/Signature.
-3. Cross-compare all extracted fields across all documents to detect even minor spelling differences (e.g., "Kr." vs "Kumar"), missing middle names, or DOB discrepancies.
-4. Check certificate validity against Today's Date and Target Scheme rules (e.g., Income/OBC-NCL/EWS certificates older than 1 year from Issue Date or past their Valid-Till date are EXPIRED).
-5. Assess visual scan quality (blurriness, cropped edges, heavy glare). If a document is unreadable, mark its clarity as "UNREADABLE" and do not guess text (leave unreadable fields null).
-6. Calculate an honest Readiness Score (0-100): start at 100, deduct 30 for each critical blocker (name/DOB mismatch, expired certificate, unreadable scan), and deduct 10 for minor warnings (missing stamp, address phrasing difference, minor glare/crop).
+1. Auto-detect and classify every uploaded document accurately into one of these supported types:
+   - Identity & Citizen IDs: "Aadhaar Card", "PAN Card", "APAAR / ABC ID", "Voter ID (EPIC)", "Driving Licence", "Passport".
+   - Academic Records: "Class X Marksheet/Certificate", "Class XII Marksheet/Certificate", "College Semester Marksheet", "Bonafide Student Certificate", "Current Year Fee Receipt", "Transfer/Migration Certificate".
+   - Welfare & Category Certificates: "Family Income Certificate", "Caste / Category Certificate (SC/ST/OBC-NCL/EWS)", "Domicile / Residence Certificate", "Disability (UDID) Certificate".
+   - Banking & Uploads: "Bank Passbook Front Page / Cancelled Cheque", "Passport-Size Photograph", "Scanned Signature".
+   - Fallback: "Unidentified".
+2. Extract Core Identity Fields from every document:
+   - fullName, parentName (Father's/Mother's Name), dateOfBirth (normalized to YYYY-MM-DD), gender, address (full postal address), pinCode (6-digit Indian PIN code), idOrCertificateNumber (mask first 8 digits of any 12-digit Aadhaar as XXXX-XXXX-last4), issueDate (YYYY-MM-DD), validTillDate (YYYY-MM-DD), and officialStampOrSignaturePresent.
+3. Extract Document-Specific Deep Metadata ("deepMetadata"):
+   - Marksheets: boardOrUniversityName, rollNumber, passingYear, aggregatePercentageOrCgpa.
+   - Income / Caste / Domicile / Disability Certificates: certificateOrApplicationNumber, issuingAuthority (e.g. Tehsildar/SDM), financialYear, annualIncomeAmountInr (numeric INR amount if Income/EWS/NCL cert), incomeThresholdAlert (flag if annual income exceeds ₹2,50,000 scholarship limit or ₹8,00,000 OBC-NCL threshold).
+   - Bank Passbook / Cancelled Cheque: accountHolderName, maskedAccountNumber (last 4 digits only, e.g. XXXXXX1234), ifscCode (11-character alphanumeric), ifscValidFormat, bankAndBranchName.
+   - Passport-Size Photograph / Scanned Signature: backgroundCheck (plain light background vs cluttered), faceVisibility, signatureInkClarity.
+   Leave fields null when not applicable to that document type.
+4. Inspect Authenticity & Tamper Signals ("forensicSignals"):
+   - officialSealOrStampPresent, authorizedSignaturePresent, qrOrDigitalVerificationPresent (DigiLocker / e-District QR code), tamperOrLayoutAnomalies (font/alignment inconsistencies, pasted overlays, cropped borders, glare/blur), and confidenceScore (0-100).
+5. Cross-compare all extracted fields across all uploaded documents (Full Name, Father's/Mother's Name, Date of Birth, Gender, Address/PIN Code, and Bank Account Holder Name) to detect even minor spelling differences (e.g. "Kr." vs "Kumar"), missing middle names, PIN code mismatches, or DOB conflicts.
+6. Enforce Date & Indian Financial Year Policy Math against Today's Date:
+   - Any Family Income Certificate or OBC-NCL / EWS Certificate issued BEFORE April 1 of the current Financial Year (for 2026-27 schemes, issued before 2026-04-01) or past its Valid-Till date MUST be marked "EXPIRED".
+7. Assess visual scan quality (CLEAR, MINOR_GLARE, SLIGHTLY_CROPPED, BLURRY, UNREADABLE). Never guess unreadable text (leave unreadable fields null).
+8. Calculate an honest Readiness Score (0-100): start at 100, deduct 30 for each critical blocker (name/DOB mismatch, expired/prior-FY certificate, unreadable scan, missing mandatory scheme document, invalid IFSC), and deduct 10 for minor warnings (missing stamp/QR, address phrasing difference, minor glare/crop, income threshold warning).
 
 Return ONLY valid JSON matching the provided schema.`;
 
@@ -164,6 +184,7 @@ const AUDIT_RESPONSE_SCHEMA = {
               dateOfBirth: { type: Type.STRING, nullable: true },
               gender: { type: Type.STRING, nullable: true },
               address: { type: Type.STRING, nullable: true },
+              pinCode: { type: Type.STRING, nullable: true },
               idOrCertificateNumber: { type: Type.STRING, nullable: true },
               issueDate: { type: Type.STRING, nullable: true },
               validTillDate: { type: Type.STRING, nullable: true },
@@ -175,10 +196,72 @@ const AUDIT_RESPONSE_SCHEMA = {
               'dateOfBirth',
               'gender',
               'address',
+              'pinCode',
               'idOrCertificateNumber',
               'issueDate',
               'validTillDate',
               'officialStampOrSignaturePresent',
+            ],
+          },
+          deepMetadata: {
+            type: Type.OBJECT,
+            properties: {
+              boardOrUniversityName: { type: Type.STRING, nullable: true },
+              rollNumber: { type: Type.STRING, nullable: true },
+              passingYear: { type: Type.STRING, nullable: true },
+              aggregatePercentageOrCgpa: { type: Type.STRING, nullable: true },
+              certificateOrApplicationNumber: { type: Type.STRING, nullable: true },
+              issuingAuthority: { type: Type.STRING, nullable: true },
+              financialYear: { type: Type.STRING, nullable: true },
+              annualIncomeAmountInr: { type: Type.NUMBER, nullable: true },
+              incomeThresholdAlert: { type: Type.STRING, nullable: true },
+              accountHolderName: { type: Type.STRING, nullable: true },
+              maskedAccountNumber: { type: Type.STRING, nullable: true },
+              ifscCode: { type: Type.STRING, nullable: true },
+              ifscValidFormat: { type: Type.BOOLEAN, nullable: true },
+              bankAndBranchName: { type: Type.STRING, nullable: true },
+              backgroundCheck: { type: Type.STRING, nullable: true },
+              faceVisibility: { type: Type.STRING, nullable: true },
+              signatureInkClarity: { type: Type.STRING, nullable: true },
+            },
+            required: [
+              'boardOrUniversityName',
+              'rollNumber',
+              'passingYear',
+              'aggregatePercentageOrCgpa',
+              'certificateOrApplicationNumber',
+              'issuingAuthority',
+              'financialYear',
+              'annualIncomeAmountInr',
+              'incomeThresholdAlert',
+              'accountHolderName',
+              'maskedAccountNumber',
+              'ifscCode',
+              'ifscValidFormat',
+              'bankAndBranchName',
+              'backgroundCheck',
+              'faceVisibility',
+              'signatureInkClarity',
+            ],
+          },
+          forensicSignals: {
+            type: Type.OBJECT,
+            properties: {
+              officialSealOrStampPresent: { type: Type.BOOLEAN, nullable: true },
+              authorizedSignaturePresent: { type: Type.BOOLEAN, nullable: true },
+              qrOrDigitalVerificationPresent: { type: Type.BOOLEAN, nullable: true },
+              tamperOrLayoutAnomalies: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+              },
+              confidenceScore: { type: Type.INTEGER },
+            },
+            required: [
+              'officialSealOrStampPresent',
+              'authorizedSignaturePresent',
+              'qrOrDigitalVerificationPresent',
+              'tamperOrLayoutAnomalies',
+              'confidenceScore',
             ],
           },
           documentWarnings: {
@@ -199,6 +282,8 @@ const AUDIT_RESPONSE_SCHEMA = {
           'validityStatus',
           'validityNotes',
           'extractedFields',
+          'deepMetadata',
+          'forensicSignals',
           'documentWarnings',
           'documentBlockers',
         ],
@@ -264,13 +349,29 @@ function normalizeAuditOutput(
 ): ComplianceAuditResult {
   const normalizedDocs: AuditedDocument[] = (parsed.documents ?? []).map((doc, idx) => {
     const fallbackName = uploadedDocs[idx]?.name ?? `Document ${idx + 1}`;
-    const maskedId = maskAadhaarNumber(
-      doc.extractedFields?.idOrCertificateNumber ?? null,
-      doc.documentType ?? '',
+    const docType = doc.documentType ?? 'Unidentified';
+    const isBankDoc = /bank passbook|cancelled cheque|passbook|cheque/i.test(docType);
+
+    const maskedId = isBankDoc
+      ? maskBankAccountNumber(doc.extractedFields?.idOrCertificateNumber ?? doc.deepMetadata?.maskedAccountNumber ?? null)
+      : maskAadhaarNumber(doc.extractedFields?.idOrCertificateNumber ?? null, docType);
+
+    const pinCode = extractIndianPinCode(
+      doc.extractedFields?.address,
+      doc.extractedFields?.pinCode,
+    );
+
+    const maskedBankAccount = maskBankAccountNumber(
+      doc.deepMetadata?.maskedAccountNumber ?? (isBankDoc ? doc.extractedFields?.idOrCertificateNumber : null),
+    );
+    const ifscCheck = validateIfscCode(doc.deepMetadata?.ifscCode);
+    const deterministicIncomeAlert = evaluateIncomeThresholds(
+      docType,
+      doc.deepMetadata?.annualIncomeAmountInr,
     );
 
     const deterministicValidity = checkCertificateValidity(
-      doc.documentType ?? '',
+      docType,
       doc.extractedFields?.issueDate ?? null,
       doc.extractedFields?.validTillDate ?? null,
       todayDate,
@@ -287,18 +388,94 @@ function normalizeAuditOutput(
         ? deterministicValidity.notes
         : doc.validityNotes;
 
+    const warnings = [...(doc.documentWarnings ?? [])];
+    const blockers = [...(doc.documentBlockers ?? [])];
+
+    if (
+      deterministicIncomeAlert &&
+      !warnings.some((w) => w.includes('2.5L') || w.includes('8.0L'))
+    ) {
+      warnings.push(deterministicIncomeAlert);
+    }
+
+    if (ifscCheck.normalized && ifscCheck.isValid === false) {
+      const ifscErr = `IFSC code "${ifscCheck.normalized}" fails 11-character Indian banking format (AAAA0XXXXXX).`;
+      if (!blockers.some((b) => b.toLowerCase().includes('ifsc'))) {
+        blockers.push(ifscErr);
+      }
+    }
+
+    if (
+      validityStatus === 'EXPIRED' &&
+      !blockers.some((b) => /expired|prior fy|april 1|renewal/i.test(b))
+    ) {
+      blockers.push(validityNotes);
+    }
+
+    const rawConfidence = doc.forensicSignals?.confidenceScore;
+    const confidenceScore =
+      typeof rawConfidence === 'number' && !Number.isNaN(rawConfidence)
+        ? Math.max(0, Math.min(100, Math.round(rawConfidence)))
+        : doc.scanClarity === 'UNREADABLE'
+          ? 25
+          : doc.scanClarity === 'CLEAR'
+            ? 92
+            : 75;
+
     return {
       ...doc,
       documentIndex: doc.documentIndex || idx + 1,
       fileName: doc.fileName || fallbackName,
+      documentType: docType,
       validityStatus,
       validityNotes,
       extractedFields: {
         ...doc.extractedFields,
+        pinCode,
         idOrCertificateNumber: maskedId,
       },
+      deepMetadata: {
+        boardOrUniversityName: doc.deepMetadata?.boardOrUniversityName ?? null,
+        rollNumber: doc.deepMetadata?.rollNumber ?? null,
+        passingYear: doc.deepMetadata?.passingYear ?? null,
+        aggregatePercentageOrCgpa: doc.deepMetadata?.aggregatePercentageOrCgpa ?? null,
+        certificateOrApplicationNumber: doc.deepMetadata?.certificateOrApplicationNumber ?? null,
+        issuingAuthority: doc.deepMetadata?.issuingAuthority ?? null,
+        financialYear: doc.deepMetadata?.financialYear ?? null,
+        annualIncomeAmountInr: doc.deepMetadata?.annualIncomeAmountInr ?? null,
+        incomeThresholdAlert:
+          deterministicIncomeAlert ?? doc.deepMetadata?.incomeThresholdAlert ?? null,
+        accountHolderName: doc.deepMetadata?.accountHolderName ?? null,
+        maskedAccountNumber: maskedBankAccount,
+        ifscCode: ifscCheck.normalized,
+        ifscValidFormat: ifscCheck.isValid,
+        bankAndBranchName: doc.deepMetadata?.bankAndBranchName ?? null,
+        backgroundCheck: doc.deepMetadata?.backgroundCheck ?? null,
+        faceVisibility: doc.deepMetadata?.faceVisibility ?? null,
+        signatureInkClarity: doc.deepMetadata?.signatureInkClarity ?? null,
+      },
+      forensicSignals: {
+        officialSealOrStampPresent:
+          doc.forensicSignals?.officialSealOrStampPresent ??
+          doc.extractedFields?.officialStampOrSignaturePresent ??
+          null,
+        authorizedSignaturePresent:
+          doc.forensicSignals?.authorizedSignaturePresent ??
+          doc.extractedFields?.officialStampOrSignaturePresent ??
+          null,
+        qrOrDigitalVerificationPresent:
+          doc.forensicSignals?.qrOrDigitalVerificationPresent ?? null,
+        tamperOrLayoutAnomalies: Array.isArray(doc.forensicSignals?.tamperOrLayoutAnomalies)
+          ? doc.forensicSignals.tamperOrLayoutAnomalies
+          : [],
+        confidenceScore,
+      },
+      documentWarnings: warnings,
+      documentBlockers: blockers,
     };
   });
+
+  const missingMandatoryDocuments = evaluateSchemeChecklist(targetScheme, normalizedDocs);
 
   const deductions: ScoreDeduction[] = Array.isArray(parsed.deductions)
     ? parsed.deductions.map((d) => ({
@@ -307,6 +484,39 @@ function normalizeAuditOutput(
         points: d.severity === 'CRITICAL' ? 30 : 10,
       }))
     : [];
+
+  for (const missing of missingMandatoryDocuments) {
+    const alreadyCovered = deductions.some(
+      (d) =>
+        d.reason.toLowerCase().includes('missing') &&
+        d.reason.toLowerCase().includes(missing.label.split(' ')[0].toLowerCase()),
+    );
+    if (!alreadyCovered) {
+      deductions.unshift({
+        reason: `Missing mandatory ${targetScheme} document: ${missing.label}`,
+        severity: 'CRITICAL',
+        points: 30,
+      });
+    }
+  }
+
+  for (const doc of normalizedDocs) {
+    if (
+      doc.validityStatus === 'EXPIRED' &&
+      !deductions.some(
+        (d) =>
+          d.severity === 'CRITICAL' &&
+          /expired|prior fy|april 1|renewal/i.test(d.reason) &&
+          d.reason.toLowerCase().includes(doc.documentType.split(' ')[0].toLowerCase()),
+      )
+    ) {
+      deductions.push({
+        reason: `${doc.documentType}: ${doc.validityNotes}`,
+        severity: 'CRITICAL',
+        points: 30,
+      });
+    }
+  }
 
   const criticalCount =
     deductions.length > 0
@@ -328,6 +538,7 @@ function normalizeAuditOutput(
     readinessTier: tier,
     criticalBlockersCount: criticalCount,
     minorWarningsCount: warningCount,
+    missingMandatoryDocuments,
     deductions,
     documents: normalizedDocs,
   };
@@ -349,9 +560,9 @@ async function createServer() {
         todayDate?: string;
       };
 
-      if (!Array.isArray(documents) || documents.length < 1 || documents.length > 4) {
+      if (!Array.isArray(documents) || documents.length < 1 || documents.length > 6) {
         res.status(400).json({
-          error: 'Please upload between 1 and 4 documents (images or PDFs) to run an audit.',
+          error: 'Please upload between 1 and 6 documents (images or PDFs) to run an audit.',
         });
         return;
       }
@@ -369,7 +580,7 @@ async function createServer() {
       const ai = getAiClient();
       const parts: Part[] = [
         {
-          text: `Target Scheme Name: ${targetScheme.trim()}\nToday's Date: ${effectiveDate}\nTotal Uploaded Documents: ${documents.length}\nAudit every document thoroughly, cross-compare all fields, verify expiry against Today's Date, mask the first 8 digits of any Aadhaar number, and return ONLY JSON matching the schema.`,
+          text: `Target Scheme Name: ${targetScheme.trim()}\nToday's Date: ${effectiveDate}\nTotal Uploaded Documents: ${documents.length}\nPerform deep forensic document classification, extract all core identity + document-specific deep metadata + forensic authenticity signals, cross-compare all fields across every file, enforce financial-year validity against Today's Date (Income & OBC-NCL/EWS certificates issued before April 1 of the current financial year are EXPIRED/NEEDS RENEWAL), mask Aadhaar first 8 digits & bank account numbers except last 4 digits, validate 11-char IFSC codes, and return ONLY JSON matching the schema.`,
         },
       ];
 
